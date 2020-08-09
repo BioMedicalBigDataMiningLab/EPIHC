@@ -1,0 +1,213 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
+from model_specific import get_model
+import numpy as np
+from keras import backend as K
+import pandas as pd
+import time
+from keras.models import Model
+from keras.callbacks import Callback
+from keras.callbacks import LearningRateScheduler
+from datetime import datetime
+from sklearn.metrics import roc_auc_score,accuracy_score,recall_score,f1_score,precision_score,average_precision_score
+from sklearn.model_selection import cross_val_score,StratifiedKFold
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import scale
+import argparse
+
+name="EPIAMN_specific"
+celllines = ["GM12878","HUVEC", "HeLa-S3", "IMR90", "K562", "NHEK"]
+biochemical_fea_e = []
+biochemical_fea_p = []
+biochemical_fea_w = []
+
+
+class roc_callback(Callback):
+    def __init__(self, val_data,name):
+        self.en = val_data[0]
+        self.pr = val_data[1]
+        self.fea_e = val_data[2]
+        self.fea_p = val_data[3]
+        self.fea_w = val_data[4]
+        # self.y = val_data[5]
+        self.name = name
+
+    def on_train_begin(self, logs={}):
+        self.times = []
+        self.totaltime = time.time()
+        return
+
+    def on_train_end(self, logs={}):
+        self.totaltime = time.time() - self.totaltime
+        return
+
+    def on_epoch_begin(self, epoch, logs={}):
+        self.epoch_time_start = time.time()
+        return
+
+    def on_epoch_end(self, epoch, logs={}):
+        self.times.append(time.time() - self.epoch_time_start)
+        #y_pred = self.model.predict([self.en,self.pr,self.fea_e,self.fea_p,self.fea_w])
+        #auc_val = roc_auc_score(self.y, y_pred)
+        #aupr_val = average_precision_score(self.y, y_pred)
+
+        self.model.save_weights("/mnt/ls1/EPI/EPIAMN/models/%s_Model.h5" % (self.name))
+
+
+        #print('\r auc_val: %s ' %str(round(auc_val, 4)), end=100 * ' ' + '\n')
+        #print('\r aupr_val: %s ' % str(round(aupr_val, 4)), end=100 * ' ' + '\n')
+        return
+
+    def on_batch_begin(self, batch, logs={}):
+        return
+
+    def on_batch_end(self, batch, logs={}):
+        return
+
+
+
+
+def parse_args():
+    
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('-tr', dest='tra_input',help='input train data',type=str)
+    parser.add_argument('-te', dest='tes_input',help='input test data',type=str)
+    parser.add_argument('-tr1', dest='e_tra_input',help='input train enhancer data',type=str)
+    parser.add_argument('-tr2', dest='p_tra_input',help='input train promoter data',type=str)
+    parser.add_argument('-tl', dest='tra_label',help='input train labels',type=str)
+    
+    # parser.add_argument('-tes', dest='tes_input',help='input test enhancer data',type=str)
+    parser.add_argument('-tel', dest='tes_label',help='input test labels',type=str)
+    
+    
+    parser.add_argument('-tre', dest='tra_e_input',help='input train E data',type=str)
+    parser.add_argument('-trp', dest='tra_p_input',help='input train P data',type=str)
+    parser.add_argument('-trw', dest='tra_w_input',help='input train W data',type=str)
+    # parser.add_argument('-tee', dest='tes_e_input',help='input test E data',type=str)
+    # parser.add_argument('-tep', dest='tes_p_input',help='input test P data',type=str)
+    # parser.add_argument('-tew', dest='tes_w_input',help='input test W data',type=str)
+    args = parser.parse_args()
+    return args
+
+def train(args):
+    t1 = datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
+    global biochemical_fea_e
+    global biochemical_fea_p
+    global biochemical_fea_w
+    train=np.load(args.tra_input)
+    X_en_tra,X_pr_tra,y_tra=train['X_en_tra'],train['X_pr_tra'],train['y_tra']
+    
+
+    train_fea_e = pd.read_csv(args.tra_e_input)    
+    train_fea_p = pd.read_csv(args.tra_p_input)    
+    train_fea_w = pd.read_csv(args.tra_w_input)
+    
+    #common biofeatures
+    com_fea_e = pd.read_csv("/mnt/ls1/EPI/CASTER_EPI/standard_data/balanced_CV_seq_data/general/general_features_E.csv")    
+    com_fea_p = pd.read_csv("/mnt/ls1/EPI/CASTER_EPI/standard_data/balanced_CV_seq_data/general/general_features_P.csv")    
+    com_fea_w = pd.read_csv("/mnt/ls1/EPI/CASTER_EPI/standard_data/balanced_CV_seq_data/general/general_features_W.csv")
+    biochemical_fea_e = com_fea_e.columns
+    biochemical_fea_p = com_fea_p.columns
+    biochemical_fea_w = com_fea_w.columns
+    feature_e_dim = len(list(biochemical_fea_e))
+    feature_p_dim = len(list(biochemical_fea_p))
+    feature_w_dim = len(list(biochemical_fea_w))
+    
+    
+    train_fea_e = train_fea_e[biochemical_fea_e]
+    train_fea_p = train_fea_p[biochemical_fea_p]
+    train_fea_w = train_fea_w[biochemical_fea_w]
+    train_fea_e_scaled = scale(train_fea_e)
+    train_fea_p_scaled = scale(train_fea_p)
+    train_fea_w_scaled = scale(train_fea_w)
+
+    # X_en_tra = X_en_tra[:1000]
+    # X_pr_tra = X_pr_tra[:1000]
+    # train_fea_e_scaled=train_fea_e_scaled[:1000]
+    # train_fea_p_scaled=train_fea_p_scaled[:1000]
+    # train_fea_w_scaled=train_fea_w_scaled[:1000]
+    # y_tra = y_tra[:1000]
+
+    model=None
+    model=get_model(feature_e_dim,feature_p_dim,feature_w_dim)
+    model.summary()
+    back = roc_callback(val_data=[X_en_tra, X_pr_tra,train_fea_e_scaled,train_fea_p_scaled,train_fea_w_scaled],name=name)
+    history=model.fit([X_en_tra, X_pr_tra,train_fea_e_scaled,train_fea_p_scaled,train_fea_w_scaled], y_tra, epochs=5, batch_size=128,
+                      callbacks=[back])
+    
+
+    np.save("./EPIVAN_my_time.npy",back.times)
+    t2 = datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
+    print("开始时间:"+t1+"结束时间："+t2)
+
+def test(args):
+    X_tes_path = args.tes_input
+   
+    for cell in celllines:
+        test_labels = []
+
+        test = np.load(X_tes_path+cell+"_EPW/"+cell+"_test_3.npz")
+        
+        test_fea_e = pd.read_csv(X_tes_path+cell+"_EPW/"+cell+"_features_test_3_E.csv")    
+        test_fea_p = pd.read_csv(X_tes_path+cell+"_EPW/"+cell+"_features_test_3_P.csv")    
+        test_fea_w = pd.read_csv(X_tes_path+cell+"_EPW/"+cell+"_features_test_3_W.csv")
+        
+
+        test_fea_e = test_fea_e[biochemical_fea_e]
+        test_fea_p = test_fea_p[biochemical_fea_p]
+        test_fea_w = test_fea_w[biochemical_fea_w]
+        
+        test_fea_e_scaled = scale(test_fea_e)
+        test_fea_p_scaled = scale(test_fea_p)
+        test_fea_w_scaled = scale(test_fea_w)
+        
+        feature_e_dim = len(list(test_fea_e.columns))
+        feature_p_dim = len(list(test_fea_p.columns))
+        feature_w_dim = len(list(test_fea_w.columns))
+        
+        model=None
+        model = get_model(feature_e_dim,feature_p_dim,feature_w_dim)
+        model.load_weights("/mnt/ls1/EPI/EPIAMN/models/"+name+"_Model.h5")
+        
+        X_en_tes,X_pr_tes=test['X_en_tes'],test['X_pr_tes']
+        y_tes = test['y_tes']
+        y_pred = model.predict([X_en_tes,X_pr_tes,test_fea_e_scaled,test_fea_p_scaled,test_fea_w_scaled])
+        for i in range(len(y_pred)):
+            if y_pred[i] >= 0.5:
+                test_labels.append(1)
+            else:
+                test_labels.append(0)
+        model_performance("./specific_test_result.csv",args.tra_input[:-5]+"_"+cell,y_pred,test_labels,y_tes)
+    
+    
+    
+def model_performance(results_file,Type,model_proba,model_predict,test_y):
+    print(len(test_y))
+    print(len(model_proba))
+    AUC = roc_auc_score(test_y, model_proba)
+    AUPR = average_precision_score(test_y, model_proba)
+    Accuracy = accuracy_score(test_y, model_predict)
+    Sensitivity = recall_score(test_y, model_predict)
+    Specificity=(Accuracy*len(test_y)-Sensitivity*sum(test_y))/(len(test_y)-sum(test_y))
+    F1 = f1_score(test_y, model_predict)
+    Precision = precision_score(test_y, model_predict)
+    save_results(results_file,Type,AUC,AUPR,Accuracy,Sensitivity,Specificity,F1,Precision)
+    return 0
+
+def save_results(results_file,Type,AUC,AUPR,Accuracy,Sensitivity,Specificity,F1,Precision):
+    with open(results_file,"a+") as op:
+        if os.path.getsize(results_file):
+            op.write(str(Type)+","+str(AUC)+","+str(AUPR)+","+str(Accuracy)+","+str(Sensitivity)+","+str(Specificity)+","+str(F1)+","+str(Precision)+"\n")
+        else:
+            op.write("Type,AUC,AUPR,Accuracy,Sensitivity,Specificity,F1,Precision\n")
+            op.write(str(Type)+","+str(AUC)+","+str(AUPR)+","+str(Accuracy)+","+str(Sensitivity)+","+str(Specificity)+","+str(F1)+","+str(Precision)+"\n")
+
+def main():
+    args = parse_args()
+    train(args)
+    test(args)
+
+if __name__ == '__main__':
+    main()
+
