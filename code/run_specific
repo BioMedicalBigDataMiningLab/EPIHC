@@ -1,0 +1,22 @@
+import os
+
+
+names = ["GM12878","HUVEC", "HeLa-S3", "IMR90", "K562", "NHEK"]
+train_dir="/mnt/ls1/EPI/CASTER_EPI/standard_data/balanced_CV_seq_data/"
+imbltrain="/mnt/ls1/EPI/CASTER_EPI/standard_data/imbalanced_CV_seq_data/"
+test_dir=train_dir
+
+
+for name in names:
+    train_path = train_dir+name+"_EPW/"
+    train_data_path = train_path+name+"_train_3.npz"
+    train_fea_E_path = train_path+name+"_features_train_3_E.csv"
+    train_fea_P_path = train_path+name+"_features_train_3_P.csv"
+    train_fea_W_path = train_path+name+"_features_train_3_W.csv"
+
+
+
+    os.system("python EPIAMN_specific.py  -tr " \
+                +train_data_path+" -te "+test_dir+ \
+              " -tre "+train_fea_E_path+" -trp "+train_fea_P_path+" -trw "+train_fea_W_path)
+
