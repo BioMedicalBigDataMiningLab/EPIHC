@@ -16,7 +16,7 @@ for name in names:
 
 
 
-    os.system("python EPIAMN_specific.py  -tr " \
+    os.system("python EPIHC_specific.py  -tr " \
                 +train_data_path+" -te "+test_dir+ \
               " -tre "+train_fea_E_path+" -trp "+train_fea_P_path+" -trw "+train_fea_W_path)
 
