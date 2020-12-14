@@ -18,36 +18,34 @@ embedding_matrix = np.load('embedding_matrix.npy')
 from keras import backend as K
 from keras import initializers
 
-class MaxAttentiveMatching(Layer):
+class AttentiveMatching(Layer):
     """
-       MaxAttentive Matching strategy, each contextual embedding picks the contextual
-       embedding of the other sentence with the highest cosine similarity as the
-       attentive vector.
+       Attentive Matching strategy, each contextual embedding is compared with its attentive
+       weighted representation of the other sentence.
     """
     def __init__(self, perspective_num=10, **kwargs):
         self.perspective_num = perspective_num
         self.kernel = None
-        super(MaxAttentiveMatching, self).__init__(**kwargs)
+        super(AttentiveMatching, self).__init__(**kwargs)
 
     def build(self, input_shape):
         self.dim = input_shape[0][-1]
         self.max_len = input_shape[0][1]
         self.kernel = self.add_weight(name='kernel', shape=(self.perspective_num, self.dim),
                                       initializer='glorot_uniform')
-        super(MaxAttentiveMatching, self).build(input_shape)
-    
+        super(AttentiveMatching, self).build(input_shape)
+
     def _cosine_similarity(self, x1, x2):
         cos = K.sum(x1 * x2, axis=-1)
         x1_norm = K.sqrt(K.maximum(K.sum(K.square(x1), axis=-1), K.epsilon()))
         x2_norm = K.sqrt(K.maximum(K.sum(K.square(x2), axis=-1), K.epsilon()))
         cos = cos / x1_norm / x2_norm
         return cos
-    
-    def _max_attentive_vectors(self, x2, cosine_matrix):
-        """Max attentive vectors.
-        Calculate max attentive vector for the entire sentence by picking
-        the contextual embedding with the highest cosine similarity
-        as the attentive vector.
+        
+    def _mean_attentive_vectors(self, x2, cosine_matrix):
+        """Mean attentive vectors.
+        Calculate mean attentive vector for the entire sentence by weighted
+        summing all the contextual embeddings of the entire sentence
         # Arguments
             x2: sequence vectors, (batch_size, x2_timesteps, embedding_size)
             cosine_matrix: cosine similarities matrix of x1 and x2,
@@ -55,26 +53,20 @@ class MaxAttentiveMatching(Layer):
         # Output shape
             (batch_size, x1_timesteps, embedding_size)
         """
-        # (batch_size, x1_timesteps)
-        max_x2_step = K.argmax(cosine_matrix, axis=-1)
-
-        embedding_size = K.int_shape(x2)[-1]
-        timesteps = K.int_shape(max_x2_step)[-1]
-        if timesteps is None:
-            timesteps = K.shape(max_x2_step)[-1]
-
-        # collapse time dimension and batch dimension together
-        # collapse x2 to (batch_size * x2_timestep, embedding_size)
-        x2 = K.reshape(x2, (-1, embedding_size))
-        # collapse max_x2_step to (batch_size * h1_timesteps)
-        max_x2_step = K.reshape(max_x2_step, (-1,))
-        # (batch_size * x1_timesteps, embedding_size)
-        max_x2 = K.gather(x2, max_x2_step)
-        # reshape max_x2, (batch_size, x1_timesteps, embedding_size)
-        attentive_vector = K.reshape(max_x2, K.stack([-1, timesteps, embedding_size]))
+        # (batch_size, x1_timesteps, x2_timesteps, 1)
+        expanded_cosine_matrix = K.expand_dims(cosine_matrix, axis=-1)
+        # (batch_size, 1, x2_timesteps, embedding_size)
+        x2 = K.expand_dims(x2, axis=1)
+        # (batch_size, x1_timesteps, embedding_size)
+        weighted_sum = K.sum(expanded_cosine_matrix * x2, axis=2)
+        # (batch_size, x1_timesteps, 1)
+        sum_cosine = K.expand_dims(K.sum(cosine_matrix, axis=-1) + K.epsilon(), axis=-1)
+        # (batch_size, x1_timesteps, embedding_size)
+        attentive_vector = weighted_sum / sum_cosine
         return attentive_vector
-    
+
     def call(self, inputs, **kwargs):
+        
         sent1 = inputs[0]
         sent2 = inputs[1]
 
@@ -84,9 +76,9 @@ class MaxAttentiveMatching(Layer):
 
         v1 = K.expand_dims(sent1, -2) * self.kernel
         
-        max_attentive_vec = self._max_attentive_vectors(sent2, cos_matrix)
-        max_attentive_vec = K.expand_dims(max_attentive_vec, -2) * self.kernel
-        matching = self._cosine_similarity(v1, max_attentive_vec)
+        mean_attentive_vec = self._mean_attentive_vectors(sent2, cos_matrix)
+        mean_attentive_vec = K.expand_dims(mean_attentive_vec, -2) * self.kernel
+        matching = self._cosine_similarity(v1, mean_attentive_vec)
         return matching
 
     def compute_output_shape(self, input_shape):
@@ -94,7 +86,7 @@ class MaxAttentiveMatching(Layer):
 
     def get_config(self):
         config = {'perspective_num': self.perspective_num}
-        base_config = super(MaxAttentiveMatching, self).get_config()
+        base_config = super(AttentiveMatching, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
 
@@ -128,11 +120,14 @@ def get_model(features_e_dim,features_p_dim,features_w_dim):
     promoter_max_pool_layer = MaxPooling1D(pool_size = 20, strides = 20)(promoter_conv_layer)  
     pro_layer = GlobalMaxPooling1D()(promoter_conv_layer)
     
-    matching_layer = MaxAttentiveMatching(128)
-    matching1 = MaxAttentiveMatching(128)([enhancer_max_pool_layer, promoter_max_pool_layer])
-    matching2 = MaxAttentiveMatching(128)([promoter_max_pool_layer, enhancer_max_pool_layer])
-    matching = Concatenate(axis=1)([matching1, matching2])
-    matching = GlobalMaxPooling1D()(matching)
+    matching1 = AttentiveMatching(128)([enhancer_max_pool_layer, promoter_max_pool_layer])
+    matching2 = AttentiveMatching(128)([promoter_max_pool_layer, enhancer_max_pool_layer])
+    
+    matching1 = Lambda(lambda x: K.permute_dimensions(x, (0, 2, 1)))(matching1)
+    matching2 = Lambda(lambda x: K.permute_dimensions(x, (0, 2, 1)))(matching2)
+    matching1 = GlobalAveragePooling1D()(matching1)
+    matching2 = GlobalAveragePooling1D()(matching2)
+    matching = Concatenate(axis=1)([matching1,matching2])
     
     con_1 = Concatenate(axis=1)([enh_layer,matching,pro_layer])
 
