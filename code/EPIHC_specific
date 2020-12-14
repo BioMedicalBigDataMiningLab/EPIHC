@@ -15,8 +15,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import scale
 import argparse
 
-name="EPIAMN_specific"
-celllines = ["GM12878","HUVEC", "HeLa-S3", "IMR90", "K562", "NHEK"]
+name="EPIHC_specific"
 biochemical_fea_e = []
 biochemical_fea_p = []
 biochemical_fea_w = []
@@ -51,7 +50,7 @@ class roc_callback(Callback):
         #auc_val = roc_auc_score(self.y, y_pred)
         #aupr_val = average_precision_score(self.y, y_pred)
 
-        self.model.save_weights("/mnt/ls1/EPI/EPIAMN/models/%s_Model.h5" % (self.name))
+        self.model.save_weights("/mnt/ls1/EPI/EPIHC/models/%s_Model.h5" % (self.name))
 
 
         #print('\r auc_val: %s ' %str(round(auc_val, 4)), end=100 * ' ' + '\n')
@@ -77,16 +76,12 @@ def parse_args():
     parser.add_argument('-tr2', dest='p_tra_input',help='input train promoter data',type=str)
     parser.add_argument('-tl', dest='tra_label',help='input train labels',type=str)
     
-    # parser.add_argument('-tes', dest='tes_input',help='input test enhancer data',type=str)
     parser.add_argument('-tel', dest='tes_label',help='input test labels',type=str)
     
     
     parser.add_argument('-tre', dest='tra_e_input',help='input train E data',type=str)
     parser.add_argument('-trp', dest='tra_p_input',help='input train P data',type=str)
     parser.add_argument('-trw', dest='tra_w_input',help='input train W data',type=str)
-    # parser.add_argument('-tee', dest='tes_e_input',help='input test E data',type=str)
-    # parser.add_argument('-tep', dest='tes_p_input',help='input test P data',type=str)
-    # parser.add_argument('-tew', dest='tes_w_input',help='input test W data',type=str)
     args = parser.parse_args()
     return args
 
@@ -122,13 +117,6 @@ def train(args):
     train_fea_p_scaled = scale(train_fea_p)
     train_fea_w_scaled = scale(train_fea_w)
 
-    # X_en_tra = X_en_tra[:1000]
-    # X_pr_tra = X_pr_tra[:1000]
-    # train_fea_e_scaled=train_fea_e_scaled[:1000]
-    # train_fea_p_scaled=train_fea_p_scaled[:1000]
-    # train_fea_w_scaled=train_fea_w_scaled[:1000]
-    # y_tra = y_tra[:1000]
-
     model=None
     model=get_model(feature_e_dim,feature_p_dim,feature_w_dim)
     model.summary()
@@ -137,7 +125,7 @@ def train(args):
                       callbacks=[back])
     
 
-    np.save("./EPIVAN_my_time.npy",back.times)
+    np.save("./EPIHC_my_time.npy",back.times)
     t2 = datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
     print("开始时间:"+t1+"结束时间："+t2)
 
@@ -168,7 +156,7 @@ def test(args):
         
         model=None
         model = get_model(feature_e_dim,feature_p_dim,feature_w_dim)
-        model.load_weights("/mnt/ls1/EPI/EPIAMN/models/"+name+"_Model.h5")
+        model.load_weights("/mnt/ls1/EPI/EPIHC/models/"+name+"_Model.h5")
         
         X_en_tes,X_pr_tes=test['X_en_tes'],test['X_pr_tes']
         y_tes = test['y_tes']
@@ -178,7 +166,7 @@ def test(args):
                 test_labels.append(1)
             else:
                 test_labels.append(0)
-        model_performance("./specific_test_result.csv",args.tra_input[:-5]+"_"+cell,y_pred,test_labels,y_tes)
+        model_performance("./specific_test_result.csv",cell,y_pred,test_labels,y_tes)
     
     
     
