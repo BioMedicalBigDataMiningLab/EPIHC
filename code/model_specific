@@ -22,6 +22,7 @@ class AttentiveMatching(Layer):
     """
        Attentive Matching strategy, each contextual embedding is compared with its attentive
        weighted representation of the other sentence.
+       From Bilateral Multi-Perspective Matching for Natural Language Sentences(https://arxiv.org/abs/1702.03814)
     """
     def __init__(self, perspective_num=10, **kwargs):
         self.perspective_num = perspective_num
