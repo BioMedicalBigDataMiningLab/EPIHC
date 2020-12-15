@@ -127,7 +127,7 @@ def train(args):
 
     np.save("./EPIHC_my_time.npy",back.times)
     t2 = datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
-    print("开始时间:"+t1+"结束时间："+t2)
+    print("begin_time:"+t1+"end_time："+t2)
 
 def test(args):
     X_tes_path = args.tes_input
